@@ -2,8 +2,6 @@
 
 import { useState, useRef, useEffect } from "react";
 
-const STORAGE_KEY = "expense-tracker-expenses";
-
 const CATEGORIES = [
   "Utilities",
   "Charity / Donations",
@@ -55,23 +53,22 @@ export default function ExpenseTracker() {
   const [filterCategory, setFilterCategory] = useState("All");
   const fileRef = useRef();
 
-  // Load from localStorage on mount
+  // Load expenses from Supabase on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setExpenses(JSON.parse(saved));
-    } catch (e) {}
-    setIsLoadingData(false);
+    async function loadExpenses() {
+      try {
+        const res = await fetch("/api/expenses");
+        const data = await res.json();
+        if (Array.isArray(data)) setExpenses(data);
+        else throw new Error(data.error || "Failed to load");
+      } catch (e) {
+        showFeedback("error", "Could not load expenses: " + e.message);
+      } finally {
+        setIsLoadingData(false);
+      }
+    }
+    loadExpenses();
   }, []);
-
-  // Save to localStorage whenever expenses change
-  function updateExpenses(updater) {
-    setExpenses(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch (e) {}
-      return next;
-    });
-  }
 
   function showFeedback(type, message) {
     setFeedback({ type, message });
@@ -104,6 +101,17 @@ Return ONLY a valid JSON object with these fields:
 If you cannot find a valid expense, return {"error": "reason"}.
 No markdown, no explanation, just the JSON object.`;
 
+  async function addExpenseToDb(expenseData) {
+    const res = await fetch("/api/expenses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(expenseData),
+    });
+    const saved = await res.json();
+    if (saved.error) throw new Error(saved.error);
+    return saved;
+  }
+
   async function handleExtract() {
     if (!inputText.trim()) return;
     setIsProcessing(true);
@@ -113,14 +121,14 @@ No markdown, no explanation, just the JSON object.`;
       if (result.error) {
         showFeedback("error", `Could not extract: ${result.error}`);
       } else {
-        const expense = { ...result, id: Date.now(), addedAt: new Date().toISOString() };
-        updateExpenses(prev => [expense, ...prev]);
+        const saved = await addExpenseToDb(result);
+        setExpenses(prev => [saved, ...prev]);
         setInputText("");
         setActiveTab("log");
         showFeedback("success", `Added: ${result.merchant} — ${formatCurrency(result.amount)}`);
       }
     } catch (e) {
-      showFeedback("error", "Extraction failed. Please try again.");
+      showFeedback("error", "Extraction failed: " + e.message);
     }
     setIsProcessing(false);
   }
@@ -167,20 +175,47 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
       if (result.error) {
         showFeedback("error", `Could not extract: ${result.error}`);
       } else {
-        const expense = { ...result, id: Date.now(), addedAt: new Date().toISOString() };
-        updateExpenses(prev => [expense, ...prev]);
+        const saved = await addExpenseToDb(result);
+        setExpenses(prev => [saved, ...prev]);
         setActiveTab("log");
         showFeedback("success", `Added from image: ${result.merchant} — ${formatCurrency(result.amount)}`);
       }
     } catch (e) {
-      showFeedback("error", "Image extraction failed. Please try again.");
+      showFeedback("error", "Image extraction failed: " + e.message);
     }
     setIsProcessing(false);
     e.target.value = "";
   }
 
-  function deleteExpense(id) {
-    updateExpenses(prev => prev.filter(e => e.id !== id));
+  async function deleteExpense(id) {
+    try {
+      const res = await fetch("/api/expenses", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setExpenses(prev => prev.filter(e => e.id !== id));
+    } catch (e) {
+      showFeedback("error", "Delete failed: " + e.message);
+    }
+  }
+
+  async function clearAll() {
+    if (!window.confirm("Clear all expenses? This cannot be undone.")) return;
+    try {
+      await Promise.all(expenses.map(e =>
+        fetch("/api/expenses", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: e.id }),
+        })
+      ));
+      setExpenses([]);
+    } catch (e) {
+      showFeedback("error", "Clear failed: " + e.message);
+    }
   }
 
   function startEdit(expense) {
@@ -188,9 +223,20 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
     setEditValues({ ...expense });
   }
 
-  function saveEdit() {
-    updateExpenses(prev => prev.map(e => e.id === editingId ? { ...e, ...editValues } : e));
-    setEditingId(null);
+  async function saveEdit() {
+    try {
+      const res = await fetch("/api/expenses", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editValues),
+      });
+      const updated = await res.json();
+      if (updated.error) throw new Error(updated.error);
+      setExpenses(prev => prev.map(e => e.id === editingId ? updated : e));
+      setEditingId(null);
+    } catch (e) {
+      showFeedback("error", "Save failed: " + e.message);
+    }
   }
 
   function exportCSV() {
@@ -327,7 +373,7 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
                 color: expenses.length === 0 ? "#475569" : "#94A3B8",
                 padding: "6px 14px", fontSize: 12, cursor: expenses.length === 0 ? "not-allowed" : "pointer",
               }}>Export CSV</button>
-              <button onClick={() => { if (window.confirm("Clear all expenses? This cannot be undone.")) updateExpenses([]); }} disabled={expenses.length === 0} style={{
+              <button onClick={clearAll} disabled={expenses.length === 0} style={{
                 background: "#1E293B", border: "1px solid #334155", borderRadius: 8,
                 color: expenses.length === 0 ? "#475569" : "#EF4444",
                 padding: "6px 14px", fontSize: 12, cursor: expenses.length === 0 ? "not-allowed" : "pointer",
