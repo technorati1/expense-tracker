@@ -106,7 +106,7 @@ Return ONLY a valid JSON object with these fields:
 {
   "merchant": "name of store/service/payee",
   "amount": numeric value only (no currency symbols),
-  "currency": "USD" or detected currency code,
+  "currency": ISO currency code — if you see "Rs.", "Rs", "PKR", or "Rupees" use "PKR"; if "USD" or "$" use "USD"; otherwise detect accordingly,
   "date": "YYYY-MM-DD format ONLY if explicitly stated in the text, else null — do NOT guess or use today's date",
   "category": one of: "Utilities", "Charity / Donations", "Online Shopping", "Food & Dining", "Transport", "Subscriptions", "Healthcare", "Education", "Other",
   "description": "brief one-line description of the transaction",
@@ -165,12 +165,12 @@ No markdown, no explanation, just the JSON object.`;
           system: `You are an expense extraction assistant. Extract expense details from this receipt image.
 Return ONLY a valid JSON object:
 {
-  "merchant": "name of store/service/payee",
-  "amount": numeric value only,
-  "currency": "USD" or detected currency code,
-  "date": "YYYY-MM-DD ONLY if explicitly stated in the image, else null — do NOT guess or use today's date",
+  "merchant": "name of store/service/payee (e.g. JazzCash, Easypaisa, bank name, shop name)",
+  "amount": numeric value only — exclude any fees, use the main transferred/paid amount,
+  "currency": use ISO currency code — if you see "Rs.", "Rs", "PKR", or "Rupees" use "PKR"; otherwise use the appropriate code,
+  "date": "YYYY-MM-DD ONLY if a date is explicitly visible in the image (e.g. 'June 15, 2026' → '2026-06-15'), else null — do NOT guess or use today's date",
   "category": one of: "Utilities", "Charity / Donations", "Online Shopping", "Food & Dining", "Transport", "Subscriptions", "Healthcare", "Education", "Other",
-  "description": "brief one-line description",
+  "description": "brief one-line description including recipient name if visible",
   "confidence": "high" or "low"
 }
 If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
