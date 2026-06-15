@@ -49,9 +49,9 @@ function formatTotals(totalsMap) {
 }
 
 function formatDate(dateStr) {
-  if (!dateStr) return "—";
+  if (!dateStr) return "No date";
   const d = new Date(dateStr);
-  if (isNaN(d)) return dateStr;
+  if (isNaN(d)) return "No date";
   return d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" });
 }
 
@@ -107,7 +107,7 @@ Return ONLY a valid JSON object with these fields:
   "merchant": "name of store/service/payee",
   "amount": numeric value only (no currency symbols),
   "currency": "USD" or detected currency code,
-  "date": "YYYY-MM-DD format if found, else null",
+  "date": "YYYY-MM-DD format ONLY if explicitly stated in the text, else null — do NOT guess or use today's date",
   "category": one of: "Utilities", "Charity / Donations", "Online Shopping", "Food & Dining", "Transport", "Subscriptions", "Healthcare", "Education", "Other",
   "description": "brief one-line description of the transaction",
   "confidence": "high" or "low"
@@ -168,7 +168,7 @@ Return ONLY a valid JSON object:
   "merchant": "name of store/service/payee",
   "amount": numeric value only,
   "currency": "USD" or detected currency code,
-  "date": "YYYY-MM-DD or null",
+  "date": "YYYY-MM-DD ONLY if explicitly stated in the image, else null — do NOT guess or use today's date",
   "category": one of: "Utilities", "Charity / Donations", "Online Shopping", "Food & Dining", "Transport", "Subscriptions", "Healthcare", "Education", "Other",
   "description": "brief one-line description",
   "confidence": "high" or "low"
