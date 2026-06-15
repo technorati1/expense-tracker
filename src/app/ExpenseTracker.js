@@ -26,12 +26,26 @@ const CATEGORY_COLORS = {
   "Other": "#6B7280",
 };
 
-function formatCurrency(amount) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(amount || 0);
+function formatAmount(amount, currency = "USD") {
+  const cur = currency || "USD";
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: cur,
+      minimumFractionDigits: 2,
+    }).format(amount || 0);
+  } catch {
+    // Fallback for unknown currency codes
+    return `${cur} ${parseFloat(amount || 0).toFixed(2)}`;
+  }
+}
+
+// Group amounts by currency and return a display string
+function formatTotals(totalsMap) {
+  return Object.entries(totalsMap)
+    .sort(([a], [b]) => a === "PKR" ? -1 : b === "PKR" ? 1 : a.localeCompare(b))
+    .map(([cur, amt]) => formatAmount(amt, cur))
+    .join("  +  ");
 }
 
 function formatDate(dateStr) {
@@ -125,7 +139,7 @@ No markdown, no explanation, just the JSON object.`;
         setExpenses(prev => [saved, ...prev]);
         setInputText("");
         setActiveTab("log");
-        showFeedback("success", `Added: ${result.merchant} — ${formatCurrency(result.amount)}`);
+        showFeedback("success", `Added: ${result.merchant} — ${formatAmount(result.amount, result.currency)}`);
       }
     } catch (e) {
       showFeedback("error", "Extraction failed: " + e.message);
@@ -178,7 +192,7 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
         const saved = await addExpenseToDb(result);
         setExpenses(prev => [saved, ...prev]);
         setActiveTab("log");
-        showFeedback("success", `Added from image: ${result.merchant} — ${formatCurrency(result.amount)}`);
+        showFeedback("success", `Added from image: ${result.merchant} — ${formatAmount(result.amount, result.currency)}`);
       }
     } catch (e) {
       showFeedback("error", "Image extraction failed: " + e.message);
@@ -253,13 +267,32 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
   }
 
   const filtered = filterCategory === "All" ? expenses : expenses.filter(e => e.category === filterCategory);
-  const total = filtered.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
-  const categoryTotals = CATEGORIES.map(cat => ({
-    cat,
-    total: expenses.filter(e => e.category === cat).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0),
-    count: expenses.filter(e => e.category === cat).length,
-  })).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
-  const grandTotal = expenses.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+
+  // Group totals by currency
+  function sumByCurrency(list) {
+    return list.reduce((acc, e) => {
+      const cur = e.currency || "USD";
+      acc[cur] = (acc[cur] || 0) + (parseFloat(e.amount) || 0);
+      return acc;
+    }, {});
+  }
+
+  const filteredTotals = sumByCurrency(filtered);
+  const grandTotals = sumByCurrency(expenses);
+
+  const categoryTotals = CATEGORIES.map(cat => {
+    const catExpenses = expenses.filter(e => e.category === cat);
+    return {
+      cat,
+      totals: sumByCurrency(catExpenses),
+      count: catExpenses.length,
+    };
+  }).filter(c => c.count > 0)
+    .sort((a, b) => {
+      const aTotal = Object.values(a.totals).reduce((s, v) => s + v, 0);
+      const bTotal = Object.values(b.totals).reduce((s, v) => s + v, 0);
+      return bTotal - aTotal;
+    });
 
   if (isLoadingData) {
     return (
@@ -281,7 +314,17 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 11, color: "#64748B", marginBottom: 2 }}>Total Logged</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: "#34D399", letterSpacing: "-1px" }}>{formatCurrency(grandTotal)}</div>
+              {Object.keys(grandTotals).length === 0 ? (
+                <div style={{ fontSize: 24, fontWeight: 700, color: "#34D399", letterSpacing: "-1px" }}>—</div>
+              ) : (
+                Object.entries(grandTotals)
+                  .sort(([a], [b]) => a === "PKR" ? -1 : b === "PKR" ? 1 : a.localeCompare(b))
+                  .map(([cur, amt]) => (
+                    <div key={cur} style={{ fontSize: cur === "PKR" ? 22 : 16, fontWeight: 700, color: "#34D399", letterSpacing: "-0.5px", lineHeight: 1.3 }}>
+                      {formatAmount(amt, cur)}
+                    </div>
+                  ))
+              )}
               <div style={{ fontSize: 11, color: "#64748B" }}>{expenses.length} expense{expenses.length !== 1 ? "s" : ""}</div>
             </div>
           </div>
@@ -390,7 +433,7 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #1E293B", marginBottom: 4 }}>
                   <span style={{ fontSize: 12, color: "#64748B" }}>{filtered.length} expense{filtered.length !== 1 ? "s" : ""}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#34D399" }}>{formatCurrency(total)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#34D399" }}>{formatTotals(filteredTotals)}</span>
                 </div>
                 {filtered.map(expense => (
                   <div key={expense.id} style={{ background: "#1E293B", borderRadius: 10, padding: "12px 14px", border: "1px solid #1E293B" }}>
@@ -418,7 +461,7 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                             <div style={{ fontWeight: 600, fontSize: 14, color: "#F1F5F9", marginBottom: 2 }}>{expense.merchant || "Unknown"}</div>
                             <div style={{ fontWeight: 700, fontSize: 15, color: "#F1F5F9", marginLeft: 8 }}>
-                              {expense.currency !== "USD" ? expense.currency + " " : ""}{formatCurrency(expense.amount)}
+                              {formatAmount(expense.amount, expense.currency)}
                             </div>
                           </div>
                           <div style={{ fontSize: 11, color: "#64748B", marginBottom: 4 }}>
@@ -452,12 +495,22 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
               <div>
                 <div style={{ background: "#1E293B", borderRadius: 12, padding: 20, marginBottom: 16, border: "1px solid #334155" }}>
                   <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>Total Spending</div>
-                  <div style={{ fontSize: 32, fontWeight: 800, color: "#34D399", letterSpacing: "-1px" }}>{formatCurrency(grandTotal)}</div>
+                  <div style={{ lineHeight: 1.4 }}>
+                    {Object.entries(grandTotals)
+                      .sort(([a], [b]) => a === "PKR" ? -1 : b === "PKR" ? 1 : a.localeCompare(b))
+                      .map(([cur, amt]) => (
+                        <div key={cur} style={{ fontSize: cur === "PKR" ? 30 : 20, fontWeight: 800, color: "#34D399", letterSpacing: "-1px" }}>
+                          {formatAmount(amt, cur)}
+                        </div>
+                      ))}
+                  </div>
                   <div style={{ fontSize: 12, color: "#64748B", marginTop: 4 }}>{expenses.length} transactions</div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {categoryTotals.map(({ cat, total, count }) => {
-                    const pct = grandTotal > 0 ? (total / grandTotal) * 100 : 0;
+                  {categoryTotals.map(({ cat, totals, count }) => {
+                    const catSum = Object.values(totals).reduce((s, v) => s + v, 0);
+                    const grandSum = Object.values(grandTotals).reduce((s, v) => s + v, 0);
+                    const pct = grandSum > 0 ? (catSum / grandSum) * 100 : 0;
                     return (
                       <div key={cat} style={{ background: "#1E293B", borderRadius: 10, padding: "12px 14px", border: "1px solid #334155" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
@@ -467,7 +520,7 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
                             <span style={{ fontSize: 11, color: "#64748B", marginLeft: 6 }}>{count} txn{count !== 1 ? "s" : ""}</span>
                           </div>
                           <div style={{ textAlign: "right" }}>
-                            <span style={{ fontSize: 14, fontWeight: 700, color: "#F1F5F9" }}>{formatCurrency(total)}</span>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: "#F1F5F9" }}>{formatTotals(totals)}</span>
                             <span style={{ fontSize: 11, color: "#64748B", marginLeft: 6 }}>{pct.toFixed(0)}%</span>
                           </div>
                         </div>
