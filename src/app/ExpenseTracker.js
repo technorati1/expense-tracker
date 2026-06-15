@@ -11,6 +11,7 @@ const CATEGORIES = [
   "Subscriptions",
   "Healthcare",
   "Education",
+  "Bank Fees / Charges",
   "Other",
 ];
 
@@ -23,6 +24,7 @@ const CATEGORY_COLORS = {
   "Subscriptions": "#EC4899",
   "Healthcare": "#06B6D4",
   "Education": "#F97316",
+  "Bank Fees / Charges": "#94A3B8",
   "Other": "#6B7280",
 };
 
@@ -35,12 +37,10 @@ function formatAmount(amount, currency = "USD") {
       minimumFractionDigits: 2,
     }).format(amount || 0);
   } catch {
-    // Fallback for unknown currency codes
     return `${cur} ${parseFloat(amount || 0).toFixed(2)}`;
   }
 }
 
-// Group amounts by currency and return a display string
 function formatTotals(totalsMap) {
   return Object.entries(totalsMap)
     .sort(([a], [b]) => a === "PKR" ? -1 : b === "PKR" ? 1 : a.localeCompare(b))
@@ -55,6 +55,24 @@ function formatDate(dateStr) {
   return d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+const CATEGORIES_LIST = `"Utilities", "Charity / Donations", "Online Shopping", "Food & Dining", "Transport", "Subscriptions", "Healthcare", "Education", "Bank Fees / Charges", "Other"`;
+
+const EXTRACTION_RULES = `
+IMPORTANT — Fees & charges:
+- If the receipt shows a main amount AND a separate fee/charge/tax, return TWO objects in the array:
+  1. The main transaction with its amount and appropriate category
+  2. A separate entry for the fee with category "Bank Fees / Charges" and description like "JazzCash transfer fee"
+- If there is no fee, return an array with just one object.
+
+Currency rules:
+- If you see "Rs.", "Rs", "PKR", or "Rupees" → use "PKR"
+- If you see "$" or "USD" → use "USD"
+- Otherwise detect accordingly
+
+Date rules:
+- Use YYYY-MM-DD format ONLY if a date is explicitly stated — do NOT guess or use today's date
+- If no date found, use null`;
+
 export default function ExpenseTracker() {
   const [expenses, setExpenses] = useState([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -67,7 +85,6 @@ export default function ExpenseTracker() {
   const [filterCategory, setFilterCategory] = useState("All");
   const fileRef = useRef();
 
-  // Load expenses from Supabase on mount
   useEffect(() => {
     async function loadExpenses() {
       try {
@@ -101,28 +118,48 @@ export default function ExpenseTracker() {
     return raw.replace(/```json|```/g, "").trim();
   }
 
-  const extractionSystem = `You are an expense extraction assistant. Extract expense details from receipt text or transaction messages.
-Return ONLY a valid JSON object with these fields:
+  const textExtractionSystem = `You are an expense extraction assistant. Extract expense details from receipt text or transaction messages.
+Always return a JSON array (even for a single expense). Each item in the array is an object:
 {
   "merchant": "name of store/service/payee",
   "amount": numeric value only (no currency symbols),
-  "currency": ISO currency code — if you see "Rs.", "Rs", "PKR", or "Rupees" use "PKR"; if "USD" or "$" use "USD"; otherwise detect accordingly,
-  "date": "YYYY-MM-DD format ONLY if explicitly stated in the text, else null — do NOT guess or use today's date",
-  "category": one of: "Utilities", "Charity / Donations", "Online Shopping", "Food & Dining", "Transport", "Subscriptions", "Healthcare", "Education", "Other",
-  "description": "brief one-line description of the transaction",
+  "currency": ISO currency code,
+  "date": "YYYY-MM-DD or null",
+  "category": one of: ${CATEGORIES_LIST},
+  "description": "brief one-line description",
   "confidence": "high" or "low"
 }
-If you cannot find a valid expense, return {"error": "reason"}.
-No markdown, no explanation, just the JSON object.`;
+${EXTRACTION_RULES}
+If you cannot find any valid expense, return [{"error": "reason"}].
+No markdown, no explanation, just the JSON array.`;
 
-  async function addExpenseToDb(expenseData) {
-    const res = await fetch("/api/expenses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(expenseData),
-    });
-    const saved = await res.json();
-    if (saved.error) throw new Error(saved.error);
+  const imageExtractionSystem = `You are an expense extraction assistant. Extract expense details from this receipt image.
+Always return a JSON array (even for a single expense). Each item in the array is an object:
+{
+  "merchant": "name of store/service/payee (e.g. JazzCash, Easypaisa, bank name, shop name)",
+  "amount": numeric value only,
+  "currency": ISO currency code,
+  "date": "YYYY-MM-DD or null",
+  "category": one of: ${CATEGORIES_LIST},
+  "description": "brief one-line description including recipient name if visible",
+  "confidence": "high" or "low"
+}
+${EXTRACTION_RULES}
+If not a receipt, return [{"error": "reason"}].
+No markdown, just the JSON array.`;
+
+  async function saveExtractedExpenses(results) {
+    const saved = [];
+    for (const result of results) {
+      const res = await fetch("/api/expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(result),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      saved.push(data);
+    }
     return saved;
   }
 
@@ -130,16 +167,21 @@ No markdown, no explanation, just the JSON object.`;
     if (!inputText.trim()) return;
     setIsProcessing(true);
     try {
-      const raw = await callClaude([{ role: "user", content: inputText }], extractionSystem);
-      const result = JSON.parse(raw);
-      if (result.error) {
-        showFeedback("error", `Could not extract: ${result.error}`);
+      const raw = await callClaude([{ role: "user", content: inputText }], textExtractionSystem);
+      const results = JSON.parse(raw);
+      if (!Array.isArray(results)) throw new Error("Unexpected response format");
+      if (results[0]?.error) {
+        showFeedback("error", `Could not extract: ${results[0].error}`);
       } else {
-        const saved = await addExpenseToDb(result);
-        setExpenses(prev => [saved, ...prev]);
+        const saved = await saveExtractedExpenses(results);
+        setExpenses(prev => [...saved, ...prev]);
         setInputText("");
         setActiveTab("log");
-        showFeedback("success", `Added: ${result.merchant} — ${formatAmount(result.amount, result.currency)}`);
+        if (saved.length === 1) {
+          showFeedback("success", `Added: ${saved[0].merchant} — ${formatAmount(saved[0].amount, saved[0].currency)}`);
+        } else {
+          showFeedback("success", `Added ${saved.length} entries: ${saved.map(s => s.merchant).join(", ")}`);
+        }
       }
     } catch (e) {
       showFeedback("error", "Extraction failed: " + e.message);
@@ -162,18 +204,7 @@ No markdown, no explanation, just the JSON object.`;
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          system: `You are an expense extraction assistant. Extract expense details from this receipt image.
-Return ONLY a valid JSON object:
-{
-  "merchant": "name of store/service/payee (e.g. JazzCash, Easypaisa, bank name, shop name)",
-  "amount": numeric value only — exclude any fees, use the main transferred/paid amount,
-  "currency": use ISO currency code — if you see "Rs.", "Rs", "PKR", or "Rupees" use "PKR"; otherwise use the appropriate code,
-  "date": "YYYY-MM-DD ONLY if a date is explicitly visible in the image (e.g. 'June 15, 2026' → '2026-06-15'), else null — do NOT guess or use today's date",
-  "category": one of: "Utilities", "Charity / Donations", "Online Shopping", "Food & Dining", "Transport", "Subscriptions", "Healthcare", "Education", "Other",
-  "description": "brief one-line description including recipient name if visible",
-  "confidence": "high" or "low"
-}
-If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
+          system: imageExtractionSystem,
           messages: [{
             role: "user",
             content: [
@@ -185,14 +216,19 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
       });
       const data = await res.json();
       const raw = data.content?.find(b => b.type === "text")?.text?.replace(/```json|```/g, "").trim() || "";
-      const result = JSON.parse(raw);
-      if (result.error) {
-        showFeedback("error", `Could not extract: ${result.error}`);
+      const results = JSON.parse(raw);
+      if (!Array.isArray(results)) throw new Error("Unexpected response format");
+      if (results[0]?.error) {
+        showFeedback("error", `Could not extract: ${results[0].error}`);
       } else {
-        const saved = await addExpenseToDb(result);
-        setExpenses(prev => [saved, ...prev]);
+        const saved = await saveExtractedExpenses(results);
+        setExpenses(prev => [...saved, ...prev]);
         setActiveTab("log");
-        showFeedback("success", `Added from image: ${result.merchant} — ${formatAmount(result.amount, result.currency)}`);
+        if (saved.length === 1) {
+          showFeedback("success", `Added from image: ${saved[0].merchant} — ${formatAmount(saved[0].amount, saved[0].currency)}`);
+        } else {
+          showFeedback("success", `Added ${saved.length} entries from image: ${saved.map(s => s.merchant).join(", ")}`);
+        }
       }
     } catch (e) {
       showFeedback("error", "Image extraction failed: " + e.message);
@@ -268,7 +304,6 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
 
   const filtered = filterCategory === "All" ? expenses : expenses.filter(e => e.category === filterCategory);
 
-  // Group totals by currency
   function sumByCurrency(list) {
     return list.reduce((acc, e) => {
       const cur = e.currency || "USD";
@@ -436,7 +471,10 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#34D399" }}>{formatTotals(filteredTotals)}</span>
                 </div>
                 {filtered.map(expense => (
-                  <div key={expense.id} style={{ background: "#1E293B", borderRadius: 10, padding: "12px 14px", border: "1px solid #1E293B" }}>
+                  <div key={expense.id} style={{
+                    background: "#1E293B", borderRadius: 10, padding: "12px 14px",
+                    border: `1px solid ${expense.category === "Bank Fees / Charges" ? "#1E3A4A" : "#1E293B"}`,
+                  }}>
                     {editingId === expense.id ? (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         <div style={{ display: "flex", gap: 8 }}>
@@ -460,7 +498,7 @@ If not a receipt, return {"error": "reason"}. No markdown, just JSON.`,
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                             <div style={{ fontWeight: 600, fontSize: 14, color: "#F1F5F9", marginBottom: 2 }}>{expense.merchant || "Unknown"}</div>
-                            <div style={{ fontWeight: 700, fontSize: 15, color: "#F1F5F9", marginLeft: 8 }}>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: expense.category === "Bank Fees / Charges" ? "#94A3B8" : "#F1F5F9", marginLeft: 8 }}>
                               {formatAmount(expense.amount, expense.currency)}
                             </div>
                           </div>
