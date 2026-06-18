@@ -537,8 +537,7 @@ No markdown, just the JSON array.`;
       e.date || "", e.merchant || "", e.amount || 0,
       e.currency || "PKR", e.category || "", e.description || ""
     ]);
-    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(",")).join("
-");
+    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
