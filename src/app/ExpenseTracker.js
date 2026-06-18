@@ -15,6 +15,7 @@ const CATEGORIES = [
   "Charity / Sadqah",
   "Charity / Zakat",
   "Bank Fees / Charges",
+  "Housekeeping Expenses",
   "Other",
 ];
 
@@ -31,6 +32,7 @@ const CATEGORY_COLORS = {
   "Charity / Sadqah": "#10B981",
   "Charity / Zakat": "#059669",
   "Bank Fees / Charges": "#94A3B8",
+  "Housekeeping Expenses": "#D97706",
   "Other": "#6B7280",
 };
 
@@ -101,7 +103,7 @@ const TAX_FORM_LINES = [
   {
     label: "Other Personal / Household",
     code: "7087",
-    categories: ["Other"],
+    categories: ["Other", "Housekeeping Expenses"],
   },
 ];
 
@@ -142,7 +144,7 @@ function pkrTotal(list) {
     .reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
 }
 
-const CATEGORIES_LIST = `"Rent", "Utilities", "Food & Dining", "Vehicle Expense", "Travelling Expense", "Online Shopping", "Subscriptions", "Healthcare", "Education", "Charity / Sadqah", "Charity / Zakat", "Bank Fees / Charges", "Other"`;
+const CATEGORIES_LIST = `"Rent", "Utilities", "Food & Dining", "Vehicle Expense", "Travelling Expense", "Online Shopping", "Subscriptions", "Healthcare", "Education", "Charity / Sadqah", "Charity / Zakat", "Bank Fees / Charges", "Housekeeping Expenses", "Other"`;
 
 const EXTRACTION_RULES = `
 IMPORTANT — Fees & charges:
@@ -166,7 +168,8 @@ Category guidance:
 - Electricity, gas, water, internet, phone bills → "Utilities"
 - Sadqah, general charity donations → "Charity / Sadqah"
 - Zakat specifically → "Charity / Zakat"
-- Monthly rent payment → "Rent"`;
+- Monthly rent payment → "Rent"
+- Cleaning supplies, domestic staff, household maintenance → "Housekeeping Expenses"`;
 
 export default function ExpenseTracker() {
   const [expenses, setExpenses] = useState([]);
