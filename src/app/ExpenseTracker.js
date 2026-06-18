@@ -187,6 +187,14 @@ export default function ExpenseTracker() {
   const [editValues, setEditValues] = useState({});
   const [filterCategory, setFilterCategory] = useState("All");
   const [selectedTaxYear, setSelectedTaxYear] = useState(0);
+  const [reportDateFrom, setReportDateFrom] = useState(() => {
+    const d = new Date();
+    d.setMonth(0); d.setDate(1);
+    return d.toISOString().split("T")[0]; // Jan 1 of current year
+  });
+  const [reportDateTo, setReportDateTo] = useState(() => new Date().toISOString().split("T")[0]);
+  const [reportCategory, setReportCategory] = useState("All");
+  const [reportSort, setReportSort] = useState("date-desc");
   const [quickForm, setQuickForm] = useState({
     merchant: "",
     amount: "",
@@ -500,6 +508,45 @@ No markdown, just the JSON array.`;
   });
   const fyGrandTotal = pkrTotal(fyExpenses);
 
+  // Custom date range report
+  const reportExpenses = expenses
+    .filter(e => {
+      if (!e.date) return false;
+      if (e.date < reportDateFrom || e.date > reportDateTo) return false;
+      if (reportCategory !== "All" && e.category !== reportCategory) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (reportSort === "date-desc") return (b.date || "").localeCompare(a.date || "");
+      if (reportSort === "date-asc") return (a.date || "").localeCompare(b.date || "");
+      if (reportSort === "amount-desc") return (parseFloat(b.amount) || 0) - (parseFloat(a.amount) || 0);
+      if (reportSort === "amount-asc") return (parseFloat(a.amount) || 0) - (parseFloat(b.amount) || 0);
+      if (reportSort === "merchant") return (a.merchant || "").localeCompare(b.merchant || "");
+      return 0;
+    });
+  const reportTotals = sumByCurrency(reportExpenses);
+  const reportCategoryBreakdown = CATEGORIES.map(cat => ({
+    cat,
+    totals: sumByCurrency(reportExpenses.filter(e => e.category === cat)),
+    count: reportExpenses.filter(e => e.category === cat).length,
+  })).filter(c => c.count > 0);
+
+  function exportReportCSV() {
+    const headers = ["Date", "Merchant", "Amount", "Currency", "Category", "Description"];
+    const rows = reportExpenses.map(e => [
+      e.date || "", e.merchant || "", e.amount || 0,
+      e.currency || "PKR", e.category || "", e.description || ""
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(",")).join("
+");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `report-${reportDateFrom}-to-${reportDateTo}.csv`;
+    a.click();
+  }
+
   if (isLoadingData) {
     return (
       <div style={{ fontFamily: "'Inter', -apple-system, sans-serif", background: "#0F172A", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748B", fontSize: 14 }}>
@@ -513,6 +560,7 @@ No markdown, just the JSON array.`;
     { id: "log", label: `Log (${expenses.length})` },
     { id: "summary", label: "Summary" },
     { id: "tax", label: "Tax Report" },
+    { id: "report", label: "Reports" },
   ];
 
   return (
@@ -932,6 +980,127 @@ No markdown, just the JSON array.`;
             <div style={{ marginTop: 12, fontSize: 11, color: "#475569", lineHeight: 1.6 }}>
               * Only PKR expenses within the selected fiscal year are included. Expenses without a date are excluded — use the edit button in the Log to assign dates.
             </div>
+          </div>
+        )}
+
+        {/* REPORTS TAB */}
+        {activeTab === "report" && (
+          <div>
+            {/* Filters row 1: date range */}
+            <div style={{ background: "#1E293B", borderRadius: 12, padding: 14, marginBottom: 12, border: "1px solid #334155", display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#94A3B8", letterSpacing: 1, textTransform: "uppercase" }}>Date Range</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: "#64748B", marginBottom: 3 }}>From</div>
+                  <input type="date" value={reportDateFrom} onChange={e => setReportDateFrom(e.target.value)}
+                    style={{ ...qInputStyle, padding: "7px 10px", fontSize: 12 }} />
+                </div>
+                <div style={{ color: "#475569", fontSize: 16, paddingTop: 16 }}>→</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: "#64748B", marginBottom: 3 }}>To</div>
+                  <input type="date" value={reportDateTo} onChange={e => setReportDateTo(e.target.value)}
+                    style={{ ...qInputStyle, padding: "7px 10px", fontSize: 12 }} />
+                </div>
+              </div>
+
+              {/* Filters row 2: category + sort */}
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: "#64748B", marginBottom: 3 }}>Category</div>
+                  <select value={reportCategory} onChange={e => setReportCategory(e.target.value)}
+                    style={{ ...qInputStyle, padding: "7px 10px", fontSize: 12 }}>
+                    <option value="All">All Categories</option>
+                    {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: "#64748B", marginBottom: 3 }}>Sort By</div>
+                  <select value={reportSort} onChange={e => setReportSort(e.target.value)}
+                    style={{ ...qInputStyle, padding: "7px 10px", fontSize: 12 }}>
+                    <option value="date-desc">Date (Newest first)</option>
+                    <option value="date-asc">Date (Oldest first)</option>
+                    <option value="amount-desc">Amount (High to Low)</option>
+                    <option value="amount-asc">Amount (Low to High)</option>
+                    <option value="merchant">Merchant (A–Z)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Summary strip */}
+            {reportExpenses.length > 0 && (
+              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, background: "#1E293B", borderRadius: 10, padding: "10px 14px", border: "1px solid #334155", minWidth: 120 }}>
+                  <div style={{ fontSize: 11, color: "#64748B", marginBottom: 2 }}>Transactions</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: "#F1F5F9" }}>{reportExpenses.length}</div>
+                </div>
+                {Object.entries(reportTotals)
+                  .sort(([a], [b]) => a === "PKR" ? -1 : b === "PKR" ? 1 : a.localeCompare(b))
+                  .map(([cur, amt]) => (
+                    <div key={cur} style={{ flex: 2, background: "#1E293B", borderRadius: 10, padding: "10px 14px", border: "1px solid #334155", minWidth: 160 }}>
+                      <div style={{ fontSize: 11, color: "#64748B", marginBottom: 2 }}>Total ({cur})</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: "#34D399" }}>{formatAmount(amt, cur)}</div>
+                    </div>
+                  ))}
+                <button onClick={exportReportCSV} style={{
+                  background: "#1E3A5F", border: "1px solid #334155", borderRadius: 10,
+                  color: "#60A5FA", padding: "10px 16px", fontSize: 12, fontWeight: 600,
+                  cursor: "pointer", alignSelf: "stretch",
+                }}>Export CSV</button>
+              </div>
+            )}
+
+            {/* Category breakdown (only when All selected) */}
+            {reportCategory === "All" && reportCategoryBreakdown.length > 0 && (
+              <div style={{ background: "#1E293B", borderRadius: 10, padding: "10px 14px", marginBottom: 12, border: "1px solid #334155" }}>
+                <div style={{ fontSize: 11, color: "#64748B", marginBottom: 8, letterSpacing: 1, textTransform: "uppercase" }}>Category Breakdown</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {reportCategoryBreakdown.map(({ cat, totals, count }) => (
+                    <div key={cat} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: CATEGORY_COLORS[cat] || "#6B7280" }} />
+                        <span style={{ fontSize: 12, color: "#CBD5E1" }}>{cat}</span>
+                        <span style={{ fontSize: 11, color: "#475569" }}>({count})</span>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "#F1F5F9" }}>{formatTotals(totals)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Expense list */}
+            {reportExpenses.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "48px 0", color: "#475569" }}>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>🔍</div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>No expenses found</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>Try adjusting the date range or category filter</div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {reportExpenses.map(expense => (
+                  <div key={expense.id} style={{
+                    background: "#1E293B", borderRadius: 10, padding: "11px 14px",
+                    border: `1px solid ${expense.category === "Bank Fees / Charges" ? "#1E3A4A" : "#1E293B"}`,
+                    display: "flex", alignItems: "flex-start", gap: 10,
+                  }}>
+                    <div style={{ width: 7, height: 7, borderRadius: "50%", marginTop: 5, background: CATEGORY_COLORS[expense.category] || "#6B7280", flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: "#F1F5F9" }}>{expense.merchant || "Unknown"}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: expense.category === "Bank Fees / Charges" ? "#94A3B8" : "#F1F5F9", marginLeft: 8, flexShrink: 0 }}>
+                          {formatAmount(expense.amount, expense.currency)}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                        {formatDate(expense.date)} · <span style={{ color: CATEGORY_COLORS[expense.category] || "#6B7280" }}>{expense.category}</span>
+                      </div>
+                      {expense.description && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>{expense.description}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
