@@ -169,7 +169,11 @@ Category guidance:
 - Sadqah, general charity donations → "Charity / Sadqah"
 - Zakat specifically → "Charity / Zakat"
 - Monthly rent payment → "Rent"
-- Cleaning supplies, domestic staff, household maintenance → "Housekeeping Expenses"`;
+- Cleaning supplies, domestic staff, household maintenance → "Housekeeping Expenses"
+
+Recurring/periodic expenses:
+- If the text describes a recurring expense (e.g. "Rs. 5,000 per month from July 2025 to June 2026"), create ONE entry per month with the correct date (YYYY-MM-01 for each month) — do not create a single lump sum entry
+- If the period is long (more than 6 months), instead create a single entry with the total amount and note the recurrence in the description`;
 
 export default function ExpenseTracker() {
   const [expenses, setExpenses] = useState([]);
@@ -223,8 +227,26 @@ export default function ExpenseTracker() {
     });
     if (!res.ok) throw new Error("API error");
     const data = await res.json();
+    if (data.error) throw new Error(data.error);
     const raw = data.content?.find(b => b.type === "text")?.text || "";
-    return raw.replace(/```json|```/g, "").trim();
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    // If response was truncated, attempt to close the JSON array gracefully
+    if (data.stop_reason === "max_tokens") {
+      try {
+        return JSON.parse(cleaned);
+      } catch {
+        // Try to salvage partial JSON by closing any open array
+        const lastBrace = cleaned.lastIndexOf("}");
+        if (lastBrace !== -1) {
+          const salvaged = cleaned.slice(0, lastBrace + 1) + "]";
+          try {
+            return JSON.parse(salvaged);
+          } catch {}
+        }
+        throw new Error("Response was too long and could not be parsed. Try splitting into fewer entries.");
+      }
+    }
+    return cleaned;
   }
 
   const textExtractionSystem = `You are an expense extraction assistant. Extract expense details from receipt text or transaction messages.
@@ -276,8 +298,8 @@ No markdown, just the JSON array.`;
     if (!inputText.trim()) return;
     setIsProcessing(true);
     try {
-      const raw = await callClaude([{ role: "user", content: inputText }], textExtractionSystem);
-      const results = JSON.parse(raw);
+      const rawOrParsed = await callClaude([{ role: "user", content: inputText }], textExtractionSystem);
+      const results = typeof rawOrParsed === "string" ? JSON.parse(rawOrParsed) : rawOrParsed;
       if (!Array.isArray(results)) throw new Error("Unexpected response format");
       if (results[0]?.error) {
         showFeedback("error", `Could not extract: ${results[0].error}`);
