@@ -805,6 +805,7 @@ No markdown, just the JSON array.`;
                             {CATEGORIES.map(c => <option key={c}>{c}</option>)}
                           </select>
                         </div>
+                        <input value={editValues.description || ""} onChange={e => setEditValues(v => ({ ...v, description: e.target.value }))} placeholder="Notes (optional)" style={inputStyle} />
                         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                           <button onClick={() => setEditingId(null)} style={{ ...btnStyle, background: "#334155" }}>Cancel</button>
                           <button onClick={saveEdit} style={{ ...btnStyle, background: "#059669" }}>Save</button>
