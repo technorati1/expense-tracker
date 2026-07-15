@@ -193,7 +193,7 @@ export default function ExpenseTracker() {
     return d.toISOString().split("T")[0]; // Jan 1 of current year
   });
   const [reportDateTo, setReportDateTo] = useState(() => new Date().toISOString().split("T")[0]);
-  const [reportCategory, setReportCategory] = useState("All");
+  const [reportCategories, setReportCategories] = useState([]); // empty = All
   const [reportSort, setReportSort] = useState("date-desc");
   const [quickForm, setQuickForm] = useState({
     merchant: "",
@@ -513,7 +513,7 @@ No markdown, just the JSON array.`;
     .filter(e => {
       if (!e.date) return false;
       if (e.date < reportDateFrom || e.date > reportDateTo) return false;
-      if (reportCategory !== "All" && e.category !== reportCategory) return false;
+      if (reportCategories.length > 0 && !reportCategories.includes(e.category)) return false;
       return true;
     })
     .sort((a, b) => {
@@ -1006,12 +1006,48 @@ No markdown, just the JSON array.`;
               {/* Filters row 2: category + sort */}
               <div style={{ display: "flex", gap: 8 }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: "#64748B", marginBottom: 3 }}>Category</div>
-                  <select value={reportCategory} onChange={e => setReportCategory(e.target.value)}
-                    style={{ ...qInputStyle, padding: "7px 10px", fontSize: 12 }}>
-                    <option value="All">All Categories</option>
-                    {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                  </select>
+                  <div style={{ fontSize: 11, color: "#64748B", marginBottom: 3 }}>
+                    Categories
+                    {reportCategories.length > 0 && (
+                      <span style={{ marginLeft: 6, color: "#34D399", fontSize: 10 }}>
+                        {reportCategories.length} selected
+                      </span>
+                    )}
+                  </div>
+                  <div style={{
+                    background: "#0F172A", border: "1px solid #334155", borderRadius: 8,
+                    padding: "6px 0", maxHeight: 180, overflowY: "auto",
+                  }}>
+                    {/* All toggle */}
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", cursor: "pointer",
+                      background: reportCategories.length === 0 ? "#1E3A2E" : "transparent" }}>
+                      <input type="checkbox"
+                        checked={reportCategories.length === 0}
+                        onChange={() => setReportCategories([])}
+                        style={{ accentColor: "#34D399" }} />
+                      <span style={{ fontSize: 12, color: reportCategories.length === 0 ? "#34D399" : "#CBD5E1", fontWeight: reportCategories.length === 0 ? 600 : 400 }}>All Categories</span>
+                    </label>
+                    <div style={{ borderTop: "1px solid #1E293B", margin: "4px 0" }} />
+                    {CATEGORIES.map(cat => {
+                      const checked = reportCategories.includes(cat);
+                      return (
+                        <label key={cat} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", cursor: "pointer",
+                          background: checked ? "#1E2A3A" : "transparent" }}>
+                          <input type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setReportCategories(prev =>
+                                prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+                              );
+                            }}
+                            style={{ accentColor: CATEGORY_COLORS[cat] || "#34D399" }} />
+                          <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%",
+                            background: CATEGORY_COLORS[cat] || "#6B7280", flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, color: checked ? "#F1F5F9" : "#94A3B8", fontWeight: checked ? 500 : 400 }}>{cat}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: "#64748B", marginBottom: 3 }}>Sort By</div>
@@ -1051,7 +1087,7 @@ No markdown, just the JSON array.`;
             )}
 
             {/* Category breakdown (only when All selected) */}
-            {reportCategory === "All" && reportCategoryBreakdown.length > 0 && (
+            {reportCategories.length === 0 && reportCategoryBreakdown.length > 0 && (
               <div style={{ background: "#1E293B", borderRadius: 10, padding: "10px 14px", marginBottom: 12, border: "1px solid #334155" }}>
                 <div style={{ fontSize: 11, color: "#64748B", marginBottom: 8, letterSpacing: 1, textTransform: "uppercase" }}>Category Breakdown</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
